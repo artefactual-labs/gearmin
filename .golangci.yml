@@ -1,0 +1,20 @@
+run:
+  deadline: 60s
+
+linters:
+  enable:
+    - misspell
+    - gofumpt
+    - unparam
+    - gosec
+    - unused
+
+issues:
+  exclude-rules:
+    - path: _test\.go
+      linters:
+        - errcheck
+
+linters-settings:
+  gofumpt:
+    extra-rules: true
