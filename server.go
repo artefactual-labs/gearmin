@@ -285,14 +285,13 @@ func (s *Server) handleWorkReport(e *event) {
 }
 
 func (s *Server) handleRequest(e *event) {
-	args := e.args
+	args, sessionID := e.args, e.sessionID
 	switch e.cmd {
 	case packetCanDo, packetCanDoTimeout:
 		w := args.t0.(*worker)
 		funcName := args.t1.(string)
 		s.handleCanDo(funcName, w)
 	case packetCantDo:
-		sessionID := e.sessionID
 		funcName := args.t0.(string)
 		if jw, ok := s.workersByFuncName[funcName]; ok {
 			s.removeWorker(jw.workers, sessionID)
@@ -302,7 +301,6 @@ func (s *Server) handleRequest(e *event) {
 		w := args.t0.(*worker)
 		w.id = args.t1.(string)
 	case packetGrabJobUniq:
-		sessionID := e.sessionID
 		var j *job
 		if w, ok := s.workersBySessionID[sessionID]; ok {
 			w.status = workerStatusRunning
@@ -318,7 +316,6 @@ func (s *Server) handleRequest(e *event) {
 		}
 		e.result <- j
 	case packetPreSleep:
-		sessionID := e.sessionID
 		w, ok := s.workersBySessionID[sessionID]
 		if !ok {
 			w = args.t0.(*worker)

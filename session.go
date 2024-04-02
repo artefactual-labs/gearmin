@@ -3,7 +3,6 @@ package gearmin
 import (
 	"bufio"
 	"bytes"
-	"fmt"
 	"net"
 	"time"
 )
@@ -167,14 +166,13 @@ func (se *session) handleBinaryConnection(s *Server, conn net.Conn, r *bufio.Rea
 			se.w = se.getWorker(sessionID, inbox, conn)
 			s.requests <- &event{cmd: pt, args: &cmdArgs{t0: se.w}, sessionID: sessionID}
 		case packetSetClientId:
-			fmt.Println(string(args[0]))
 			se.w = se.getWorker(sessionID, inbox, conn)
 			s.requests <- &event{cmd: pt, args: &cmdArgs{t0: se.w, t1: string(args[0])}}
 		case packetGrabJobUniq:
 			if se.w == nil {
 				return
 			}
-			e := newEventWithResults(pt, nil, 0)
+			e := newEventWithResults(pt, nil, sessionID)
 			s.requests <- e
 			job := (<-e.result).(*job)
 			if job == nil {
