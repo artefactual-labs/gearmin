@@ -1,5 +1,8 @@
 # gearmin
 
+[![go.dev reference](https://img.shields.io/badge/go.dev-reference-007d9c?logo=go&logoColor=white&style=flat-square)](https://pkg.go.dev/github.com/sevein/gearmin) 
+
+
 A lightweight, embeddable implementation of the Gearman job server protocol,
 written in Go. It is designed for developers looking for an in-process job
 server compatible with existing Gearman workers. Unlike [gearmand], job
