@@ -64,8 +64,13 @@ func NewServer(cfg Config) *Server {
 }
 
 func (s *Server) Start() error {
+	addr := s.config.ListenAddr
+	if addr == "" {
+		addr = ":4730"
+	}
+
 	var err error
-	s.ln, err = net.Listen("tcp", s.config.ListenAddr)
+	s.ln, err = net.Listen("tcp", addr)
 	if err != nil {
 		return err
 	}
