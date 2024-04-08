@@ -87,4 +87,8 @@ func TestIntegration(t *testing.T) {
 
 	w.Close()
 	srv.Stop()
+	srv.Stop() // should not panic.
+
+	srv = nil
+	srv.Stop()
 }

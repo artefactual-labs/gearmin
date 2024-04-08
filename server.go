@@ -48,8 +48,10 @@ type Server struct {
 	jobHandleGenerator
 
 	// Used to coordinate graceful shutdown.
-	quit chan struct{}
-	wg   sync.WaitGroup
+	quitOnce sync.Once
+	quit     chan struct{}
+	wg       sync.WaitGroup
+	running  bool
 }
 
 func NewServer(cfg Config) *Server {
@@ -106,6 +108,8 @@ func (s *Server) Start() error {
 			go session.handleConnection(s, conn)
 		}
 	}()
+
+	s.running = true
 
 	return nil
 }
@@ -360,7 +364,15 @@ func (s *Server) closeSession(id int64) {
 }
 
 func (s *Server) Stop() {
-	close(s.quit)
-	s.ln.Close()
-	s.wg.Wait()
+	if s == nil {
+		return
+	}
+	s.quitOnce.Do(func() {
+		if !s.running {
+			return
+		}
+		close(s.quit)
+		s.ln.Close()
+		s.wg.Wait()
+	})
 }
