@@ -2,7 +2,6 @@ package gearmin
 
 import (
 	"container/list"
-	"errors"
 	"net"
 	"strconv"
 	"sync"
@@ -10,7 +9,25 @@ import (
 	"time"
 )
 
-type JobCallback func(err error)
+type JobUpdateType int
+
+const (
+	JobUpdateTypeData JobUpdateType = iota
+	JobUpdateTypeWarning
+	JobUpdateTypeStatus
+	JobUpdateTypeComplete
+	JobUpdateTypeFail
+	JobUpdateTypeException
+)
+
+type JobUpdate struct {
+	Type   JobUpdateType
+	Handle string
+	Status [2]int // Status numerator and denominator.
+	Data   []byte // Opaque data (nil if the update type does not include data).
+}
+
+type JobUpdateCallback func(update JobUpdate)
 
 type Config struct {
 	ListenAddr string
@@ -31,13 +48,11 @@ type Server struct {
 	// Used to deliver requests to the server.
 	requests chan *event
 
-	// Map of workers indexed by their function names.
-	workersByFuncName map[string]*jobWorkerMap
-
-	// Map of workers indexed by their session identifiers.
+	// Workers indexed by their function names and session identifiers.
+	workersByFuncName  map[string]*jobWorkerMap
 	workersBySessionID map[int64]*worker
 
-	// Map of jobs indexed by their handles.
+	// Jobs indexed by their handles.
 	jobsByHandle map[string]*job
 	jobsMu       sync.RWMutex
 
@@ -115,11 +130,11 @@ func (s *Server) Start() error {
 }
 
 type JobRequest struct {
-	FuncName   string      // Function name.
-	ID         string      // Job identifier.
-	Data       []byte      // Job data payload.
-	Background bool        // Whether this is a background job.
-	Callback   JobCallback // Only used by non-background jobs.
+	FuncName   string            // Function name.
+	ID         string            // Job identifier.
+	Data       []byte            // Job data payload.
+	Background bool              // Whether this is a background job.
+	Callback   JobUpdateCallback // Only used by non-background jobs.
 }
 
 // Submit a job and receive its handle.
@@ -256,24 +271,39 @@ func (s *Server) jobFailedWithException(j *job) {
 func (s *Server) handleWorkReport(e *event) {
 	slice := e.args.t0.([][]byte)
 	jobHandle := string(slice[0])
+
 	j, ok := s.getRunningJobByHandle(jobHandle)
 	if !ok {
 		return
 	}
 
-	var reportErr error
+	jobUpdate := JobUpdate{
+		Handle: jobHandle,
+	}
+
 	switch e.cmd {
+	case packetWorkData:
+		jobUpdate.Type = JobUpdateTypeData
+		jobUpdate.Data = slice[1]
+	case packetWorkWarning:
+		jobUpdate.Type = JobUpdateTypeWarning
+		jobUpdate.Data = slice[1]
 	case packetWorkStatus:
-		j.Percent, _ = strconv.Atoi(string(slice[1]))
-		j.Denominator, _ = strconv.Atoi(string(slice[2]))
-	case packetWorkException:
-		reportErr = errors.New("WORK_EXCEPTION")
-		s.jobFailedWithException(j)
-	case packetWorkFail:
-		reportErr = errors.New("WORK_FAIL")
-		s.jobFailed(j)
+		jobUpdate.Type = JobUpdateTypeStatus
+		num, _ := strconv.Atoi(string(slice[1]))
+		den, _ := strconv.Atoi(string(slice[2]))
+		jobUpdate.Status = [2]int{num, den}
 	case packetWorkComplete:
+		jobUpdate.Type = JobUpdateTypeComplete
+		jobUpdate.Data = slice[1]
 		s.jobDone(j)
+	case packetWorkFail:
+		jobUpdate.Type = JobUpdateTypeFail
+		s.jobFailed(j)
+	case packetWorkException:
+		jobUpdate.Type = JobUpdateTypeException
+		jobUpdate.Data = slice[1]
+		s.jobFailedWithException(j)
 	}
 
 	// Stop here if the job is detached.
@@ -285,7 +315,7 @@ func (s *Server) handleWorkReport(e *event) {
 		return
 	}
 
-	go j.Callback(reportErr)
+	go j.Callback(jobUpdate)
 }
 
 func (s *Server) handleRequest(e *event) {

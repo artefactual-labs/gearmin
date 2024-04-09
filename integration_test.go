@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/go-cmp/cmp/cmpopts"
 	"github.com/mikespook/gearman-go/worker"
 	"github.com/phayes/freeport"
 	"gotest.tools/v3/assert"
@@ -71,7 +72,14 @@ func TestIntegration(t *testing.T) {
 		FuncName:   "sum",
 		Data:       []byte(`{ "x": 1, "y": 1 }`),
 		Background: false,
-		Callback: func(err error) {
+		Callback: func(update gearmin.JobUpdate) {
+			assert.DeepEqual(t,
+				update, gearmin.JobUpdate{
+					Type: gearmin.JobUpdateTypeComplete,
+					Data: []byte("2"),
+				},
+				cmpopts.IgnoreFields(gearmin.JobUpdate{}, "Handle"),
+			)
 			callbackDone <- struct{}{}
 		},
 	})
@@ -83,6 +91,8 @@ func TestIntegration(t *testing.T) {
 
 	w.RemoveFunc("sum")
 	w.RemoveFunc("max")
+
+	// TODO: data race.
 	time.Sleep(time.Millisecond * 100)
 
 	w.Close()
