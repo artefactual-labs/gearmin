@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/google/go-cmp/cmp/cmpopts"
 	"github.com/mikespook/gearman-go/worker"
@@ -28,10 +27,6 @@ func TestIntegration(t *testing.T) {
 
 	w := worker.New(worker.Unlimited)
 	defer w.Close()
-	w.JobHandler = func(job worker.Job) error {
-		t.Log(job.Data())
-		return nil
-	}
 	w.AddServer("tcp4", addr)
 
 	var (
@@ -73,6 +68,8 @@ func TestIntegration(t *testing.T) {
 		Data:       []byte(`{ "x": 1, "y": 1 }`),
 		Background: false,
 		Callback: func(update gearmin.JobUpdate) {
+			assert.Equal(t, update.Failed(), false)
+			assert.Equal(t, update.Succeeded(), true)
 			assert.DeepEqual(t,
 				update, gearmin.JobUpdate{
 					Type: gearmin.JobUpdateTypeComplete,
@@ -92,13 +89,10 @@ func TestIntegration(t *testing.T) {
 	w.RemoveFunc("sum")
 	w.RemoveFunc("max")
 
-	// TODO: data race.
-	time.Sleep(time.Millisecond * 100)
-
 	w.Close()
+
 	srv.Stop()
 	srv.Stop() // should not panic.
-
 	srv = nil
-	srv.Stop()
+	srv.Stop() // should not panic.
 }

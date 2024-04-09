@@ -4,7 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"net"
-	"time"
+	"sync"
 )
 
 type event struct {
@@ -73,44 +73,31 @@ const (
 	workerStatusPrepareForSleep = 3
 )
 
-type clientSession struct {
-	SessionID int64
-	in        chan []byte
-	ConnectAt time.Time
+type worker struct {
+	id                  string              // Identifier set by the worker (optional).
+	sessionID           int64               // Session identifier.
+	status              int                 // Worker status.
+	inbox               chan []byte         // Used to deliver messages to the worker.
+	runningJobsByHandle map[string]*job     // Running jobs by their handles.
+	canDo               map[string]struct{} // Known function names.
 }
 
-type worker struct {
-	net.Conn
-
-	clientSession
-
-	// Identifier set by the worker (optional).
-	id string
-
-	status int
-
-	runningJobsByHandle map[string]*job
-
-	// Map of function names. This used to be also used to index the job timeout
-	// but gearmin does not implement timeouts for the time being.
-	canDo map[string]struct{}
+func (w *worker) wakeUp() {
+	w.inbox <- wakeUpReply
 }
 
 type session struct {
 	w *worker
 }
 
-func (s *session) getWorker(sessionID int64, inbox chan []byte, conn net.Conn) *worker {
+func (s *session) getWorker(sessionID int64, inbox chan []byte) *worker {
 	if s.w != nil {
 		return s.w
 	}
 	s.w = &worker{
-		Conn:   conn,
-		status: workerStatusSleep,
-		clientSession: clientSession{
-			SessionID: sessionID,
-			in:        inbox, ConnectAt: time.Now(),
-		},
+		sessionID:           sessionID,
+		status:              workerStatusSleep,
+		inbox:               inbox,
 		runningJobsByHandle: make(map[string]*job),
 		canDo:               make(map[string]struct{}),
 	}
@@ -120,14 +107,27 @@ func (s *session) getWorker(sessionID int64, inbox chan []byte, conn net.Conn) *
 func (se *session) handleConnection(s *Server, conn net.Conn) {
 	sessionID := s.allocSessionID()
 	inbox := make(chan []byte, 200)
-	out := make(chan []byte, 200)
+	outbox := make(chan []byte, 200)
+
+	var wg sync.WaitGroup
+
 	defer func() {
-		s.closeSession(sessionID) // Remove session from the server.
-		close(inbox)              // Notify writer to quit.
+		wg.Wait()                       // Wait until we're done processing.
+		s.handleCloseSession(sessionID) // Remove session from the server.
+		close(inbox)                    // Notify writer to quit.
 	}()
 
-	go queueingWriter(inbox, out)
-	go writer(conn, out)
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		queueingWriter(inbox, outbox)
+	}()
+
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		writer(conn, outbox)
+	}()
 
 	r := bufio.NewReaderSize(conn, 256*1024)
 	// todo:1. reuse event's result channel, create less garbage.
@@ -141,10 +141,10 @@ func (se *session) handleConnection(s *Server, conn net.Conn) {
 	if fb[0] != byte(0) {
 		return
 	}
-	se.handleBinaryConnection(s, conn, r, sessionID, inbox)
+	se.handleBinaryConnection(s, r, sessionID, inbox)
 }
 
-func (se *session) handleBinaryConnection(s *Server, conn net.Conn, r *bufio.Reader, sessionID int64, inbox chan []byte) {
+func (se *session) handleBinaryConnection(s *Server, r *bufio.Reader, sessionID int64, inbox chan []byte) {
 	for {
 		pt, buf, err := readMessage(r)
 		if err != nil {
@@ -156,17 +156,17 @@ func (se *session) handleBinaryConnection(s *Server, conn net.Conn, r *bufio.Rea
 		}
 		switch pt {
 		case packetCanDo, packetCanDoTimeout:
-			se.w = se.getWorker(sessionID, inbox, conn)
+			se.w = se.getWorker(sessionID, inbox)
 			s.requests <- &event{cmd: pt, args: &cmdArgs{t0: se.w, t1: string(args[0])}}
 		case packetCantDo:
 			s.requests <- &event{cmd: pt, sessionID: sessionID, args: &cmdArgs{t0: string(args[0])}}
 		case packetEchoReq:
 			sendReply(inbox, packetEchoRes, [][]byte{buf})
 		case packetPreSleep:
-			se.w = se.getWorker(sessionID, inbox, conn)
+			se.w = se.getWorker(sessionID, inbox)
 			s.requests <- &event{cmd: pt, args: &cmdArgs{t0: se.w}, sessionID: sessionID}
 		case packetSetClientId:
-			se.w = se.getWorker(sessionID, inbox, conn)
+			se.w = se.getWorker(sessionID, inbox)
 			s.requests <- &event{cmd: pt, args: &cmdArgs{t0: se.w, t1: string(args[0])}}
 		case packetGrabJobUniq:
 			if se.w == nil {

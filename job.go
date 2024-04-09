@@ -24,6 +24,34 @@ type job struct {
 	Callback    JobUpdateCallback // User-provided callback.
 }
 
+type JobUpdateType int
+
+const (
+	JobUpdateTypeData JobUpdateType = iota
+	JobUpdateTypeWarning
+	JobUpdateTypeStatus
+	JobUpdateTypeComplete
+	JobUpdateTypeFail
+	JobUpdateTypeException
+)
+
+type JobUpdate struct {
+	Type   JobUpdateType
+	Handle string
+	Status [2]int // Status numerator and denominator.
+	Data   []byte // Opaque data (nil if the update type does not include data).
+}
+
+func (u JobUpdate) Succeeded() bool {
+	return u.Type == JobUpdateTypeComplete
+}
+
+func (u JobUpdate) Failed() bool {
+	return u.Type == JobUpdateTypeFail || u.Type == JobUpdateTypeException
+}
+
+type JobUpdateCallback func(update JobUpdate)
+
 type jobHandleGenerator struct {
 	start  int64
 	prefix string

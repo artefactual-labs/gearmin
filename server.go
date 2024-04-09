@@ -9,26 +9,6 @@ import (
 	"time"
 )
 
-type JobUpdateType int
-
-const (
-	JobUpdateTypeData JobUpdateType = iota
-	JobUpdateTypeWarning
-	JobUpdateTypeStatus
-	JobUpdateTypeComplete
-	JobUpdateTypeFail
-	JobUpdateTypeException
-)
-
-type JobUpdate struct {
-	Type   JobUpdateType
-	Handle string
-	Status [2]int // Status numerator and denominator.
-	Data   []byte // Opaque data (nil if the update type does not include data).
-}
-
-type JobUpdateCallback func(update JobUpdate)
-
 type Config struct {
 	ListenAddr string
 }
@@ -36,6 +16,55 @@ type Config struct {
 type jobWorkerMap struct {
 	workers *list.List
 	jobs    *list.List
+}
+
+func (m *jobWorkerMap) empty() bool {
+	return m.workers.Len() == 0 || m.jobs.Len() == 0
+}
+
+func (m *jobWorkerMap) asleep() *worker {
+	for it := m.workers.Front(); it != nil; it = it.Next() {
+		w := it.Value.(*worker)
+		if w.status == workerStatusSleep {
+			return w
+		}
+	}
+	return nil
+}
+
+// busy reports whether all jobs are busy.
+func (m *jobWorkerMap) busy() bool {
+	b := true
+	for it := m.jobs.Front(); it != nil; it = it.Next() {
+		j := it.Value.(*job)
+		if !j.Running.Load() {
+			b = false
+			break
+		}
+	}
+	return b
+}
+
+func (m *jobWorkerMap) addWorker(w *worker) {
+	for it := m.workers.Front(); it != nil; it = it.Next() {
+		if it.Value.(*worker).sessionID == w.sessionID {
+			return
+		}
+	}
+	m.workers.PushBack(w)
+}
+
+func (m *jobWorkerMap) removeWorker(sessionID int64) {
+	for it := m.workers.Front(); it != nil; it = it.Next() {
+		if it.Value.(*worker).sessionID == sessionID {
+			m.workers.Remove(it)
+			return
+		}
+	}
+}
+
+func (m *jobWorkerMap) addJob(j *job) {
+	m.jobs.PushBack(j)
 }
 
 type Server struct {
@@ -51,6 +80,7 @@ type Server struct {
 	// Workers indexed by their function names and session identifiers.
 	workersByFuncName  map[string]*jobWorkerMap
 	workersBySessionID map[int64]*worker
+	workersMu          sync.RWMutex
 
 	// Jobs indexed by their handles.
 	jobsByHandle map[string]*job
@@ -98,7 +128,7 @@ func (s *Server) Start() error {
 		for {
 			select {
 			case e := <-s.requests:
-				s.handleRequest(e)
+				s.processRequest(e)
 			case <-s.quit:
 				return
 			}
@@ -139,6 +169,9 @@ type JobRequest struct {
 
 // Submit a job and receive its handle.
 func (s *Server) Submit(r *JobRequest) string {
+	if r == nil {
+		return ""
+	}
 	j := &job{
 		Handle:     s.jobHandle(),
 		FuncName:   r.FuncName,
@@ -148,131 +181,62 @@ func (s *Server) Submit(r *JobRequest) string {
 		Background: r.Background,
 		Callback:   r.Callback,
 	}
-	s.doAddJob(j)
+	s.handleAddJob(j)
 	return j.Handle
 }
 
-func (s *Server) addWorker(l *list.List, w *worker) {
-	for it := l.Front(); it != nil; it = it.Next() {
-		if it.Value.(*worker).SessionID == w.SessionID {
-			return
-		}
+// allocSessionID returns a new session identifier.
+func (s *Server) allocSessionID() int64 {
+	return atomic.AddInt64(&s.currentSessionID, 1)
+}
+
+func (s *Server) processRequest(e *event) {
+	args, sessionID := e.args, e.sessionID
+	switch e.cmd {
+	case packetCanDo, packetCanDoTimeout:
+		w := args.t0.(*worker)
+		funcName := args.t1.(string)
+		s.handleCanDo(funcName, w)
+	case packetCantDo:
+		funcName := args.t0.(string)
+		s.handleCantDo(funcName, sessionID)
+	case packetSetClientId:
+		w := args.t0.(*worker)
+		w.id = args.t1.(string)
+	case packetGrabJobUniq:
+		e.result <- s.handleGrabJobUniq(sessionID)
+	case packetPreSleep:
+		w := args.t0.(*worker)
+		s.handlePreSleep(w)
+	case packetWorkData, packetWorkWarning, packetWorkStatus, packetWorkComplete, packetWorkFail, packetWorkException:
+		s.handleWorkReport(e)
 	}
-
-	l.PushBack(w) // add to worker list
 }
 
-func (s *Server) removeWorker(l *list.List, sessionID int64) {
-	for it := l.Front(); it != nil; it = it.Next() {
-		if it.Value.(*worker).SessionID == sessionID {
-			l.Remove(it)
-			return
-		}
-	}
-}
-
-func (s *Server) handleCanDo(funcName string, w *worker) {
-	w.canDo[funcName] = struct{}{}
-	jw := s.getJobWorkPair(funcName)
-	s.addWorker(jw.workers, w)
-	s.workersBySessionID[w.SessionID] = w
-}
-
-func (s *Server) getJobWorkPair(funcName string) *jobWorkerMap {
-	jw, ok := s.workersByFuncName[funcName]
-	if !ok { // create list
-		jw = &jobWorkerMap{workers: list.New(), jobs: list.New()}
-		s.workersByFuncName[funcName] = jw
-	}
-
-	return jw
-}
-
-func (s *Server) add2JobWorkerQueue(j *job) {
-	jw := s.getJobWorkPair(j.FuncName)
-	jw.jobs.PushBack(j)
-}
-
-func (s *Server) doAddJob(j *job) {
+func (s *Server) handleAddJob(j *job) {
 	s.jobsMu.Lock()
 	s.jobsByHandle[j.Handle] = j
 	s.jobsMu.Unlock()
-	s.add2JobWorkerQueue(j)
-	s.wakeupWorker(j.FuncName)
+
+	s.workersMu.Lock()
+	s.jobWorkerPairs(j.FuncName).addJob(j)
+	s.wakeUpWorker(j.FuncName)
+	s.workersMu.Unlock()
 }
 
-func (s *Server) popJob(sessionID int64) (j *job) {
-	for funcName := range s.workersBySessionID[sessionID].canDo {
-		if wj, ok := s.workersByFuncName[funcName]; ok {
-			for it := wj.jobs.Front(); it != nil; it = it.Next() {
-				jtmp := it.Value.(*job)
-				if jtmp.Running.Load() {
-					continue
-				}
-				j = jtmp
-				wj.jobs.Remove(it)
-				return
-			}
-		}
-	}
-	return
-}
-
-func (s *Server) wakeupWorker(funcName string) bool {
-	wj, ok := s.workersByFuncName[funcName]
-	if !ok || wj.jobs.Len() == 0 || wj.workers.Len() == 0 {
-		return false
-	}
-	// Don't wakeup for running job
-	allRunning := true
-	for it := wj.jobs.Front(); it != nil; it = it.Next() {
-		j := it.Value.(*job)
-		if !j.Running.Load() {
-			allRunning = false
-			break
-		}
-	}
-	if allRunning {
-		return false
-	}
-	for it := wj.workers.Front(); it != nil; it = it.Next() {
-		w := it.Value.(*worker)
-		if w.status != workerStatusSleep {
-			continue
-		}
-		w.in <- wakeUpReply
-		return true
-	}
-
-	return false
-}
-
-func (s *Server) removeJob(j *job) {
-	s.jobsMu.Lock()
-	delete(s.jobsByHandle, j.Handle)
-	s.jobsMu.Unlock()
-	if pw, found := s.workersBySessionID[j.ProcessedBy]; found {
-		delete(pw.runningJobsByHandle, j.Handle)
-	}
-}
-
-func (s *Server) jobDone(j *job) {
-	s.removeJob(j)
-}
-
-func (s *Server) jobFailed(j *job) {
-	s.removeJob(j)
-}
-
-func (s *Server) jobFailedWithException(j *job) {
-	s.removeJob(j)
+func (s *Server) handleCanDo(funcName string, w *worker) {
+	s.workersMu.Lock()
+	defer s.workersMu.Unlock()
+	w.canDo[funcName] = struct{}{}
+	s.jobWorkerPairs(funcName).addWorker(w)
+	s.workersBySessionID[w.sessionID] = w
 }
 
 func (s *Server) handleWorkReport(e *event) {
 	slice := e.args.t0.([][]byte)
 	jobHandle := string(slice[0])
 
-	j, ok := s.getRunningJobByHandle(jobHandle)
+	j, ok := s.runningJob(jobHandle)
 	if !ok {
 		return
 	}
@@ -296,14 +260,14 @@ func (s *Server) handleWorkReport(e *event) {
 	case packetWorkComplete:
 		jobUpdate.Type = JobUpdateTypeComplete
 		jobUpdate.Data = slice[1]
-		s.jobDone(j)
+		s.removeJob(j)
 	case packetWorkFail:
 		jobUpdate.Type = JobUpdateTypeFail
-		s.jobFailed(j)
+		s.removeJob(j)
 	case packetWorkException:
 		jobUpdate.Type = JobUpdateTypeException
 		jobUpdate.Data = slice[1]
-		s.jobFailedWithException(j)
+		s.removeJob(j)
 	}
 
 	// Stop here if the job is detached.
@@ -318,60 +282,78 @@ func (s *Server) handleWorkReport(e *event) {
 	go j.Callback(jobUpdate)
 }
 
-func (s *Server) handleRequest(e *event) {
-	args, sessionID := e.args, e.sessionID
-	switch e.cmd {
-	case packetCanDo, packetCanDoTimeout:
-		w := args.t0.(*worker)
-		funcName := args.t1.(string)
-		s.handleCanDo(funcName, w)
-	case packetCantDo:
-		funcName := args.t0.(string)
-		if jw, ok := s.workersByFuncName[funcName]; ok {
-			s.removeWorker(jw.workers, sessionID)
+func (s *Server) handleCantDo(funcName string, sessionID int64) {
+	s.workersMu.Lock()
+	defer s.workersMu.Unlock()
+	if jw, ok := s.workersByFuncName[funcName]; ok {
+		jw.removeWorker(sessionID)
+	}
+	delete(s.workersBySessionID[sessionID].canDo, funcName)
+}
+
+func (s *Server) handleGrabJobUniq(sessionID int64) *job {
+	s.workersMu.Lock()
+	defer s.workersMu.Unlock()
+	var j *job
+	if w, ok := s.workersBySessionID[sessionID]; ok {
+		w.status = workerStatusRunning
+		j = s.popJob(sessionID)
+		if j != nil {
+			j.ProcessedAt = time.Now()
+			j.ProcessedBy = sessionID
+			j.Running.Store(true)
+			w.runningJobsByHandle[j.Handle] = j
+		} else {
+			w.status = workerStatusPrepareForSleep
 		}
-		delete(s.workersBySessionID[sessionID].canDo, funcName)
-	case packetSetClientId:
-		w := args.t0.(*worker)
-		w.id = args.t1.(string)
-	case packetGrabJobUniq:
-		var j *job
-		if w, ok := s.workersBySessionID[sessionID]; ok {
-			w.status = workerStatusRunning
-			j = s.popJob(sessionID)
-			if j != nil {
-				j.ProcessedAt = time.Now()
-				j.ProcessedBy = sessionID
-				j.Running.Store(true)
-				w.runningJobsByHandle[j.Handle] = j
-			} else {
-				w.status = workerStatusPrepareForSleep
-			}
-		}
-		e.result <- j
-	case packetPreSleep:
-		w, ok := s.workersBySessionID[sessionID]
-		if !ok {
-			w = args.t0.(*worker)
-			s.workersBySessionID[w.SessionID] = w
+	}
+	return j
+}
+
+func (s *Server) handlePreSleep(w *worker) {
+	s.workersMu.Lock()
+	defer s.workersMu.Unlock()
+	ww, ok := s.workersBySessionID[w.sessionID]
+	if !ok {
+		s.workersBySessionID[w.sessionID] = w
+		return
+	}
+	ww.status = workerStatusSleep
+	for funcName := range w.canDo {
+		if s.wakeUpWorker(funcName) {
 			break
 		}
-		w.status = workerStatusSleep
-		for k := range w.canDo {
-			if s.wakeupWorker(k) {
-				break
-			}
-		}
-	case packetWorkData, packetWorkWarning, packetWorkStatus, packetWorkComplete, packetWorkFail, packetWorkException:
-		s.handleWorkReport(e)
 	}
 }
 
-func (s *Server) allocSessionID() int64 {
-	return atomic.AddInt64(&s.currentSessionID, 1)
+// handleCloseSession removes the worker session given its identifier.
+func (s *Server) handleCloseSession(id int64) {
+	s.workersMu.Lock()
+	defer s.workersMu.Unlock()
+	if _, ok := s.workersBySessionID[id]; !ok {
+		return
+	}
+	for _, jw := range s.workersByFuncName {
+		jw.removeWorker(id)
+	}
+	delete(s.workersBySessionID, id)
 }
 
-func (s *Server) getRunningJobByHandle(handle string) (*job, bool) {
+// wakeUpWorker finds and wakes the first sleeping worker for a given function.
+func (s *Server) wakeUpWorker(funcName string) bool {
+	wj, ok := s.workersByFuncName[funcName]
+	if !ok || wj.empty() || wj.busy() {
+		return false
+	}
+	if w := wj.asleep(); w != nil {
+		w.wakeUp()
+		return true
+	}
+	return false
+}
+
+// runningJob finds a running job by its handle.
+func (s *Server) runningJob(handle string) (*job, bool) {
 	s.jobsMu.RLock()
 	defer s.jobsMu.RUnlock()
 	for _, j := range s.jobsByHandle {
@@ -382,15 +364,45 @@ func (s *Server) getRunningJobByHandle(handle string) (*job, bool) {
 	return nil, false
 }
 
-// closeSession removes the worker session given its identifier.
-func (s *Server) closeSession(id int64) {
-	if _, ok := s.workersBySessionID[id]; !ok {
-		return
+func (s *Server) jobWorkerPairs(funcName string) *jobWorkerMap {
+	jw, ok := s.workersByFuncName[funcName]
+	if !ok {
+		jw = &jobWorkerMap{
+			workers: list.New(),
+			jobs:    list.New(),
+		}
+		s.workersByFuncName[funcName] = jw
 	}
-	for _, jw := range s.workersByFuncName {
-		s.removeWorker(jw.workers, id)
+
+	return jw
+}
+
+func (s *Server) popJob(sessionID int64) (j *job) {
+	for funcName := range s.workersBySessionID[sessionID].canDo {
+		if wj, ok := s.workersByFuncName[funcName]; ok {
+			for it := wj.jobs.Front(); it != nil; it = it.Next() {
+				jtmp := it.Value.(*job)
+				if jtmp.Running.Load() {
+					continue
+				}
+				j = jtmp
+				wj.jobs.Remove(it)
+				return
+			}
+		}
 	}
-	delete(s.workersBySessionID, id)
+	return
+}
+
+func (s *Server) removeJob(j *job) {
+	s.jobsMu.Lock()
+	delete(s.jobsByHandle, j.Handle)
+	s.jobsMu.Unlock()
+	s.workersMu.Lock()
+	if w, ok := s.workersBySessionID[j.ProcessedBy]; ok {
+		delete(w.runningJobsByHandle, j.Handle)
+	}
+	s.workersMu.Unlock()
 }
 
 func (s *Server) Stop() {
