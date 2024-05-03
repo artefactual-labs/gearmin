@@ -11,7 +11,7 @@ import (
 	"github.com/phayes/freeport"
 	"gotest.tools/v3/assert"
 
-	"github.com/sevein/gearmin"
+	"github.com/artefactual-labs/gearmin"
 )
 
 func TestIntegration(t *testing.T) {

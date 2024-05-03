@@ -1,4 +1,4 @@
-module github.com/sevein/gearmin
+module github.com/artefactual-labs/gearmin
 
 go 1.19
 
