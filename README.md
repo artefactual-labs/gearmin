@@ -33,8 +33,8 @@ srv.Submit(&JobRequest{
 
 ## Acknowledgement
 
-* Package forked from: https://github.com/appscode/g2
-* Gearman project: https://github.com/gearman/gearmand
+* Based on: https://github.com/gearman/gearmand.
+* Developed under the foundation of [appscode/g2] and [ngaut/gearmand].
 
 ## License
 
@@ -44,4 +44,6 @@ Apache 2.0. See [LICENSE](LICENSE).
 - Copyright (C) by @ngaut
 
 
-[gearmand]: (https://github.com/gearman/gearmand/tree/master)
+[gearmand]: https://github.com/gearman/gearmand
+[appscode/g2]: https://github.com/appscode/g2
+[ngaut/gearmand]: https://github.com/ngaut/gearmand
