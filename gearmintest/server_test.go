@@ -3,11 +3,11 @@ package gearmintest_test
 import (
 	"testing"
 
-	"github.com/mikespook/gearman-go/worker"
 	"gotest.tools/v3/assert"
 
 	"github.com/artefactual-labs/gearmin"
 	"github.com/artefactual-labs/gearmin/gearmintest"
+	"github.com/artefactual-labs/gearmin/internal/worker"
 )
 
 func TestServer(t *testing.T) {

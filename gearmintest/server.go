@@ -5,7 +5,7 @@ import (
 	"net"
 
 	"github.com/artefactual-labs/gearmin"
-	"github.com/mikespook/gearman-go/worker"
+	"github.com/artefactual-labs/gearmin/internal/worker"
 )
 
 type testingT interface {
