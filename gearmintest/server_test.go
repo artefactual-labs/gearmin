@@ -11,9 +11,11 @@ import (
 )
 
 func TestServer(t *testing.T) {
+	t.Parallel()
+
 	srv := gearmintest.Server(t, map[string]gearmintest.Handler{
 		"hello": func(job worker.Job) ([]byte, error) {
-			return []byte("hello"), nil
+			return []byte("hi!"), nil
 		},
 	})
 
@@ -27,5 +29,5 @@ func TestServer(t *testing.T) {
 
 	update := <-done
 	assert.Equal(t, update.Type, gearmin.JobUpdateTypeComplete)
-	assert.DeepEqual(t, update.Data, []byte("hello"))
+	assert.DeepEqual(t, update.Data, []byte("hi!"))
 }

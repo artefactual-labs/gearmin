@@ -9,10 +9,6 @@ import (
 	"time"
 )
 
-type Config struct {
-	ListenAddr string
-}
-
 type jobWorkerMap struct {
 	workers *list.List
 	jobs    *list.List
@@ -68,11 +64,9 @@ func (m *jobWorkerMap) addJob(j *job) {
 }
 
 type Server struct {
-	// Configuration parameters.
-	config Config
-
 	// Network listener (TCP).
 	ln net.Listener
+	mu sync.Mutex
 
 	// Used to deliver requests to the server.
 	requests chan *event
@@ -99,29 +93,44 @@ type Server struct {
 	running  bool
 }
 
-func NewServer(cfg Config) *Server {
-	return &Server{
-		config:             cfg,
+func NewServerWithAddr(addr string) (*Server, error) {
+	if addr == "" {
+		addr = ":4730"
+	}
+
+	ln, err := net.Listen("tcp", addr)
+	if err != nil {
+		return nil, err
+	}
+
+	return NewServer(ln), nil
+}
+
+func NewServer(ln net.Listener) *Server {
+	srv := &Server{
+		ln:                 ln,
 		requests:           make(chan *event, 100),
 		workersByFuncName:  make(map[string]*jobWorkerMap),
 		workersBySessionID: make(map[int64]*worker),
 		jobsByHandle:       make(map[string]*job),
 		quit:               make(chan struct{}),
 	}
+
+	srv.serve()
+
+	return srv
 }
 
-func (s *Server) Start() error {
-	addr := s.config.ListenAddr
-	if addr == "" {
-		addr = ":4730"
+func (s *Server) Addr() *net.TCPAddr {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.ln == nil {
+		return nil
 	}
+	return s.ln.Addr().(*net.TCPAddr)
+}
 
-	var err error
-	s.ln, err = net.Listen("tcp", addr)
-	if err != nil {
-		return err
-	}
-
+func (s *Server) serve() {
 	s.wg.Add(1)
 	go func() {
 		defer s.wg.Done()
@@ -155,8 +164,6 @@ func (s *Server) Start() error {
 	}()
 
 	s.running = true
-
-	return nil
 }
 
 type JobRequest struct {

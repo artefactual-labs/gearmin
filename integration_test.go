@@ -2,59 +2,37 @@ package gearmin_test
 
 import (
 	"errors"
-	"fmt"
+	"net"
 	"strings"
 	"testing"
 
 	"github.com/google/go-cmp/cmp/cmpopts"
 	"github.com/mikespook/gearman-go/worker"
-	"github.com/phayes/freeport"
 	"gotest.tools/v3/assert"
 
 	"github.com/artefactual-labs/gearmin"
 )
 
 func TestIntegration(t *testing.T) {
-	addr := fmt.Sprintf("127.0.0.1:%d", freeport.GetPort())
-	srv := gearmin.NewServer(
-		gearmin.Config{
-			ListenAddr: addr,
-		},
-	)
+	t.Parallel()
 
-	err := srv.Start()
-	assert.NilError(t, err)
-
-	w := worker.New(worker.Unlimited)
-	defer w.Close()
-	w.AddServer("tcp4", addr)
+	srv := createServer(t)
 
 	var (
 		jobDone      = make(chan struct{})
 		callbackDone = make(chan struct{})
 	)
 
-	w.AddFunc(
-		"sum",
-		func(j worker.Job) ([]byte, error) {
+	w := createWorker(t, *srv.Addr(), map[string]worker.JobFunc{
+		"sum": func(j worker.Job) ([]byte, error) {
 			jobDone <- struct{}{}
 			return []byte(`2`), nil
 		},
-		worker.Unlimited,
-	)
-	w.AddFunc(
-		"max",
-		func(j worker.Job) ([]byte, error) {
+		"max": func(j worker.Job) ([]byte, error) {
 			jobDone <- struct{}{}
 			return nil, errors.New("unexpected error")
 		},
-		worker.Unlimited,
-	)
-
-	err = w.Ready()
-	assert.NilError(t, err)
-	go w.Work()
-	t.Cleanup(func() { w.Close() })
+	})
 
 	jobHandle := srv.Submit(&gearmin.JobRequest{
 		FuncName:   "max",
@@ -95,4 +73,36 @@ func TestIntegration(t *testing.T) {
 	srv.Stop() // should not panic.
 	srv = nil
 	srv.Stop() // should not panic.
+}
+
+func createServer(t *testing.T) *gearmin.Server {
+	t.Helper()
+
+	srv, err := gearmin.NewServerWithAddr(":0")
+	assert.NilError(t, err)
+
+	t.Cleanup(func() { srv.Stop() })
+
+	return srv
+}
+
+func createWorker(t *testing.T, addr net.TCPAddr, handlers map[string]worker.JobFunc) *worker.Worker {
+	t.Helper()
+
+	w := worker.New(worker.OneByOne)
+	t.Cleanup(func() { w.Close() })
+
+	w.AddServer(addr.Network(), addr.String())
+
+	for fn, handler := range handlers {
+		w.AddFunc(fn, handler, 0)
+	}
+
+	err := w.Ready()
+	assert.NilError(t, err)
+
+	go w.Work()
+	t.Cleanup(func() { w.Close() })
+
+	return w
 }

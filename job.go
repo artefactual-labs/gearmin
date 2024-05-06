@@ -35,6 +35,24 @@ const (
 	JobUpdateTypeException
 )
 
+func (t JobUpdateType) String() string {
+	switch t {
+	case JobUpdateTypeData:
+		return "JobUpdateTypeData"
+	case JobUpdateTypeWarning:
+		return "JobUpdateTypeWarning"
+	case JobUpdateTypeStatus:
+		return "JobUpdateTypeStatus"
+	case JobUpdateTypeComplete:
+		return "JobUpdateTypeComplete"
+	case JobUpdateTypeFail:
+		return "JobUpdateTypeFail"
+	case JobUpdateTypeException:
+		return "JobUpdateTypeException"
+	}
+	return ""
+}
+
 type JobUpdate struct {
 	Type   JobUpdateType
 	Handle string
