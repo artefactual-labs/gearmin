@@ -13,19 +13,14 @@ submissions are facilitated through direct API access.
 ## Usage
 
 ```go
-cfg := gearmin.Config{}
-srv := gearmin.NewServer(cfg)
-
-err := srv.Start()
-if err != nil {
-  panic(err)
-}
+srv := gearmin.NewServerWithAddr(":4730")
 defer srv.Stop()
 
-srv.Submit(&JobRequest{
-  FuncName: "sum",
-  Data:     []byte(`{"x":1,"y":2}`),
-  Callback: func(err error) {
+srv.Submit(&gearmin.JobRequest{
+  FuncName:   "sum",
+  Data:       []byte(`{"x":1,"y":2}`),
+  Background: false,
+  Callback: func(update JobUpdate) {
     fmt.Println("Done!")
   },
 })

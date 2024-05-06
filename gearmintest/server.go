@@ -2,11 +2,10 @@
 package gearmintest
 
 import (
-	"fmt"
+	"net"
 
 	"github.com/artefactual-labs/gearmin"
 	"github.com/mikespook/gearman-go/worker"
-	"github.com/phayes/freeport"
 )
 
 type testingT interface {
@@ -23,30 +22,24 @@ type Handler func(job worker.Job) ([]byte, error)
 func Server(t testingT, handlers map[string]Handler) *gearmin.Server {
 	t.Helper()
 
-	port, err := freeport.GetFreePort()
+	srv, err := gearmin.NewServerWithAddr("127.0.0.1:0")
 	if err != nil {
-		t.Fatalf("Failed to open free port: %v", err)
-	}
-	addr := fmt.Sprintf("127.0.0.1:%d", port)
-
-	srv := gearmin.NewServer(gearmin.Config{ListenAddr: addr})
-	if err := srv.Start(); err != nil {
 		t.Fatalf("Failed to start server: %v", err)
 	}
 	t.Cleanup(func() { srv.Stop() })
 
-	createWorker(t, addr, handlers)
+	createWorker(t, *srv.Addr(), handlers)
 
 	return srv
 }
 
-func createWorker(t testingT, addr string, handlers map[string]Handler) {
+func createWorker(t testingT, addr net.TCPAddr, handlers map[string]Handler) {
 	t.Helper()
 
 	w := worker.New(worker.OneByOne)
 	t.Cleanup(func() { w.Close() })
 
-	if err := w.AddServer("tcp", addr); err != nil {
+	if err := w.AddServer(addr.Network(), addr.String()); err != nil {
 		t.Fatalf("Failed to add server to worker: %v", err)
 	}
 
