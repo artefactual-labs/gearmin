@@ -29,7 +29,8 @@ srv.Submit(&gearmin.JobRequest{
 ## Acknowledgement
 
 * Based on: https://github.com/gearman/gearmand.
-* Developed under the foundation of [appscode/g2] and [ngaut/gearmand].
+* Developed under the foundation of [appscode/g2], [ngaut/gearmand] and
+  [mikespook/gearman-go].
 
 ## License
 
@@ -42,3 +43,4 @@ Apache 2.0. See [LICENSE](LICENSE).
 [gearmand]: https://github.com/gearman/gearmand
 [appscode/g2]: https://github.com/appscode/g2
 [ngaut/gearmand]: https://github.com/ngaut/gearmand
+[mikespook/gearman-go]: https://github.com/mikespook/gearman-go
