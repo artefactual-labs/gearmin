@@ -1,0 +1,63 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - "main"
+  pull_request:
+    branches:
+      - "*"
+
+jobs:
+  test:
+    strategy:
+      # Don't abort the entire matrix if one element fails.
+      fail-fast: false
+      matrix:
+        gover: ["1.20.x", "1.21.x", "1.22.x"]
+        include:
+          - gover: "stable"
+            testflags: "-race"
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+      - name: Install Go
+        uses: actions/setup-go@v4
+        with:
+          go-version: ${{ matrix.gover }}
+      - name: Test all
+        run: go test ${{ matrix.testflags }} ./...
+        env:
+          GOARCH: ${{ matrix.goarch }}
+  apidiff:
+    runs-on: ubuntu-22.04
+    if: (github.event.action && 'pull_request' && !contains(github.event.pull_request.labels.*.name, 'breaking-change'))
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Install Go
+        uses: actions/setup-go@v4
+        with:
+          go-version: stable
+      - name: Run api-diff
+        uses: joelanford/go-apidiff@v0.8.2
+  lint:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Install Go
+        uses: actions/setup-go@v4
+        with:
+          cache: false
+          go-version: stable
+      - name: Run golangci-lint
+        uses: golangci/golangci-lint-action@v6
+        with:
+          install-mode: "binary"
