@@ -3,17 +3,25 @@ package gearmin_test
 import (
 	"errors"
 	"net"
+	"strconv"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 
 	"github.com/google/go-cmp/cmp/cmpopts"
 	"github.com/mikespook/gearman-go/worker"
+	"go.uber.org/goleak"
 	"gotest.tools/v3/assert"
 
 	"github.com/artefactual-labs/gearmin"
 )
 
-func TestIntegration(t *testing.T) {
+func TestMain(m *testing.M) {
+	goleak.VerifyTestMain(m)
+}
+
+func TestServer(t *testing.T) {
 	t.Parallel()
 
 	srv := createServer(t)
@@ -73,6 +81,49 @@ func TestIntegration(t *testing.T) {
 	srv.Stop() // should not panic.
 	srv = nil
 	srv.Stop() // should not panic.
+}
+
+func TestHighLoad(t *testing.T) {
+	// Reproduce with: go test -v -run=TestHighLoad -count=10 -timeout=10s
+	t.Skip("This fails, see issue #3 for more details.")
+
+	var wg sync.WaitGroup
+
+	var (
+		total          = 100 // Jobs.
+		executed int64 = 0   // Executed by the worker (tasks).
+		reported int64 = 0   // Reported by the server (callbacks).
+	)
+
+	srv := createServer(t)
+	_ = createWorker(t, *srv.Addr(), map[string]worker.JobFunc{
+		"say": func(j worker.Job) ([]byte, error) {
+			atomic.AddInt64(&executed, 1)
+			return j.Data(), nil
+		},
+	})
+
+	for i := 0; i < total; i++ {
+		wg.Add(1)
+		n := strconv.Itoa(i)
+		srv.Submit(&gearmin.JobRequest{
+			ID:         n,
+			FuncName:   "say",
+			Data:       []byte(n),
+			Background: false,
+			Callback: func(update gearmin.JobUpdate) {
+				atomic.AddInt64(&reported, 1)
+				assert.Equal(t, update.Succeeded(), true)
+				assert.Equal(t, string(update.Data), n)
+				wg.Done()
+			},
+		})
+	}
+
+	wg.Wait()
+
+	assert.Equal(t, executed, int64(total))
+	assert.Equal(t, reported, int64(total))
 }
 
 func createServer(t *testing.T) *gearmin.Server {
