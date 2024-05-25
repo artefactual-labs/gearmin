@@ -3,8 +3,10 @@ package gearmin
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"net"
 	"sync"
+	"time"
 )
 
 type event struct {
@@ -24,8 +26,29 @@ func newEvent(cmd packet, args *cmdArgs, sessionID int64) *event {
 
 func newEventWithResults(cmd packet, args *cmdArgs, sessionID int64) *event {
 	event := newEvent(cmd, args, sessionID)
-	event.result = make(chan interface{}, 1)
+	event.result = make(chan any, 1)
 	return event
+}
+
+// readJob attempts to receive the job from the server.
+func (e *event) readJob(ctx context.Context) *job {
+	if e.result == nil {
+		return nil
+	}
+
+	timer := time.NewTimer(time.Second)
+	defer timer.Stop()
+
+	select {
+	case r := <-e.result:
+		if job, ok := r.(*job); ok {
+			return job
+		}
+	case <-timer.C:
+	case <-ctx.Done():
+	}
+
+	return nil
 }
 
 type cmdArgs struct {
@@ -104,17 +127,28 @@ func (s *session) getWorker(sessionID int64, inbox chan []byte) *worker {
 	return s.w
 }
 
-func (se *session) handleConnection(s *Server, conn net.Conn) {
-	sessionID := s.allocSessionID()
-	inbox := make(chan []byte, 200)
-	outbox := make(chan []byte, 200)
-
-	var wg sync.WaitGroup
+func (se *session) handleConnection(ctx context.Context, s *Server, conn net.Conn) {
+	var (
+		wg        sync.WaitGroup
+		sessionID = s.allocSessionID()
+		inbox     = make(chan []byte, 200)
+		outbox    = make(chan []byte, 200)
+	)
 
 	defer func() {
-		wg.Wait()                       // Wait until we're done processing.
-		s.handleCloseSession(sessionID) // Remove session from the server.
-		close(inbox)                    // Notify writer to quit.
+		// By closing the inbox channel, we signal to the queueingWriter()
+		// function that no more messages will be sent. This causes
+		// queueingWriter() to exit its loop and close the outbox channel, which
+		// in turn causes the writer() function, which is reading from the
+		// outbox channel, to exit its loop. This ensures that both goroutines
+		// complete their execution properly.
+		close(inbox)
+
+		// Wait for all goroutines to finish their execution before proceeding.
+		wg.Wait()
+
+		// Remove session from the server.
+		s.handleCloseSession(sessionID)
 	}()
 
 	wg.Add(1)
@@ -141,10 +175,10 @@ func (se *session) handleConnection(s *Server, conn net.Conn) {
 	if fb[0] != byte(0) {
 		return
 	}
-	se.handleBinaryConnection(s, r, sessionID, inbox)
+	se.handleBinaryConnection(ctx, s, r, sessionID, inbox)
 }
 
-func (se *session) handleBinaryConnection(s *Server, r *bufio.Reader, sessionID int64, inbox chan []byte) {
+func (se *session) handleBinaryConnection(ctx context.Context, s *Server, r *bufio.Reader, sessionID int64, inbox chan []byte) {
 	for {
 		pt, buf, err := readMessage(r)
 		if err != nil {
@@ -174,7 +208,7 @@ func (se *session) handleBinaryConnection(s *Server, r *bufio.Reader, sessionID 
 			}
 			e := newEventWithResults(pt, nil, sessionID)
 			s.requests <- e
-			job := (<-e.result).(*job)
+			job := e.readJob(ctx)
 			if job == nil {
 				sendReplyResult(inbox, noJobReply)
 				break

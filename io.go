@@ -20,9 +20,7 @@ func constructReply(tp packet, data [][]byte) []byte {
 	buf := &bytes.Buffer{}
 	buf.Write(resStr)
 
-	if err := binary.Write(buf, binary.BigEndian, tp.Uint32()); err != nil {
-		panic("should never happen")
-	}
+	_ = binary.Write(buf, binary.BigEndian, tp.Uint32())
 
 	length := 0
 	for i, arg := range data {
@@ -32,9 +30,7 @@ func constructReply(tp packet, data [][]byte) []byte {
 		}
 	}
 
-	if err := binary.Write(buf, binary.BigEndian, uint32(length)); err != nil {
-		panic("should never happen")
-	}
+	_ = binary.Write(buf, binary.BigEndian, uint32(length))
 
 	for i, arg := range data {
 		buf.Write(arg)
@@ -140,6 +136,7 @@ L:
 			}
 		}
 	}
+
 	// We throw away any messages waiting to be sent, including the
 	// nil message that is automatically sent when the in channel is closed
 	close(out)

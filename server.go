@@ -2,6 +2,7 @@ package gearmin
 
 import (
 	"container/list"
+	"context"
 	"net"
 	"strconv"
 	"sync"
@@ -131,6 +132,15 @@ func (s *Server) Addr() *net.TCPAddr {
 }
 
 func (s *Server) serve() {
+	ctx, cancel := context.WithCancel(context.Background())
+
+	s.wg.Add(1)
+	go func() {
+		defer s.wg.Done()
+		<-s.quit
+		cancel()
+	}()
+
 	s.wg.Add(1)
 	go func() {
 		defer s.wg.Done()
@@ -139,6 +149,7 @@ func (s *Server) serve() {
 			case e := <-s.requests:
 				s.processRequest(e)
 			case <-s.quit:
+				cancel()
 				return
 			}
 		}
@@ -147,19 +158,18 @@ func (s *Server) serve() {
 	s.wg.Add(1)
 	go func() {
 		defer s.wg.Done()
+
 		for {
 			conn, err := s.ln.Accept()
 			if err != nil {
-				select {
-				case <-s.quit:
-					return
-				default:
-				}
-				continue
+				return
 			}
-
-			session := &session{}
-			go session.handleConnection(s, conn)
+			s.wg.Add(1)
+			go func() {
+				defer s.wg.Done()
+				session := &session{}
+				session.handleConnection(ctx, s, conn)
+			}()
 		}
 	}()
 
@@ -295,7 +305,9 @@ func (s *Server) handleCantDo(funcName string, sessionID int64) {
 	if jw, ok := s.workersByFuncName[funcName]; ok {
 		jw.removeWorker(sessionID)
 	}
-	delete(s.workersBySessionID[sessionID].canDo, funcName)
+	if w, ok := s.workersBySessionID[sessionID]; ok {
+		delete(w.canDo, funcName)
+	}
 }
 
 func (s *Server) handleGrabJobUniq(sessionID int64) *job {
