@@ -26,6 +26,8 @@ jobs:
         uses: actions/setup-go@v4
         with:
           go-version: ${{ matrix.gover }}
+      - name: Install gearman-tools
+        run: sudo apt install gearman-tools
       - name: Test all
         run: go test ${{ matrix.testflags }} ./...
         env:

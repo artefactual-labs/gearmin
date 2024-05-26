@@ -3,10 +3,13 @@ package gearmin_test
 import (
 	"errors"
 	"net"
+	"net/netip"
+	"os/exec"
 	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
+	"syscall"
 	"testing"
 
 	"github.com/google/go-cmp/cmp/cmpopts"
@@ -83,16 +86,17 @@ func TestServer(t *testing.T) {
 	srv.Stop() // should not panic.
 }
 
-func TestHighLoad(t *testing.T) {
-	// Reproduce with: go test -v -run=TestHighLoad -count=10 -timeout=10s
-	t.Skip("This fails, see issue #3 for more details.")
+func TestWithGearmanGoWorker(t *testing.T) {
+	t.Parallel()
+
+	t.Skip("gearman-go is unreliable, see issue #3 for more details.")
 
 	var wg sync.WaitGroup
 
 	var (
-		total          = 100 // Jobs.
-		executed int64 = 0   // Executed by the worker (tasks).
-		reported int64 = 0   // Reported by the server (callbacks).
+		total          = 1000 // Jobs.
+		executed int64 = 0    // Executed by the worker (tasks).
+		reported int64 = 0    // Reported by the server (callbacks).
 	)
 
 	srv := createServer(t)
@@ -126,6 +130,44 @@ func TestHighLoad(t *testing.T) {
 	assert.Equal(t, reported, int64(total))
 }
 
+func TestHighLoadWithGearmanCLIWorker(t *testing.T) {
+	t.Parallel()
+
+	var wg sync.WaitGroup
+
+	var (
+		workers        = 3    // Number of workers to run in parallel.
+		total          = 1000 // Jobs.
+		reported int64 = 0    // Reported by the server (callbacks).
+	)
+
+	srv := createServer(t)
+	for i := 0; i < workers; i++ {
+		createEchoWorker(t, srv.Addr().AddrPort(), "say")
+	}
+
+	for i := 0; i < total; i++ {
+		wg.Add(1)
+		n := strconv.Itoa(i)
+		data := []byte(n)
+		srv.Submit(&gearmin.JobRequest{
+			ID:         n,
+			FuncName:   "say",
+			Data:       data,
+			Background: false,
+			Callback: func(update gearmin.JobUpdate) {
+				atomic.AddInt64(&reported, 1)
+				assert.Equal(t, update.Succeeded(), true)
+				assert.Equal(t, string(update.Data), string(data))
+				wg.Done()
+			},
+		})
+	}
+
+	wg.Wait()
+	assert.Equal(t, reported, int64(total))
+}
+
 func createServer(t *testing.T) *gearmin.Server {
 	t.Helper()
 
@@ -156,4 +198,27 @@ func createWorker(t *testing.T, addr net.TCPAddr, handlers map[string]worker.Job
 	t.Cleanup(func() { w.Close() })
 
 	return w
+}
+
+// createEchoWorker creates a worker using the gearman command.
+// It echos the job payload.
+func createEchoWorker(t *testing.T, addr netip.AddrPort, fn string) {
+	t.Helper()
+
+	gearmanPath, err := exec.LookPath("gearman")
+	if err != nil {
+		t.Skip("gearman executable not found, install gearman-tools")
+	}
+
+	args := []string{"-w", "-h", net.IPv4zero.String(), "-p", strconv.Itoa(int(addr.Port())), "-f", fn, "cat"}
+	cmd := exec.Command(gearmanPath, args...)
+	t.Logf("Connecting gearman CLI worker to server (%s)...", addr)
+
+	cmd.Start()
+	assert.NilError(t, err)
+
+	t.Cleanup(func() {
+		cmd.Process.Signal(syscall.SIGTERM)
+		cmd.Process.Wait()
+	})
 }

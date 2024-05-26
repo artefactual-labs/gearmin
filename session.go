@@ -188,6 +188,7 @@ func (se *session) handleBinaryConnection(ctx context.Context, s *Server, r *buf
 		if !ok {
 			return
 		}
+
 		switch pt {
 		case packetCanDo, packetCanDoTimeout:
 			se.w = se.getWorker(sessionID, inbox)
@@ -202,7 +203,7 @@ func (se *session) handleBinaryConnection(ctx context.Context, s *Server, r *buf
 		case packetSetClientId:
 			se.w = se.getWorker(sessionID, inbox)
 			s.requests <- &event{cmd: pt, args: &cmdArgs{t0: se.w, t1: string(args[0])}}
-		case packetGrabJobUniq:
+		case packetGrabJobUniq, packetGrabJobAll:
 			if se.w == nil {
 				return
 			}
@@ -213,9 +214,18 @@ func (se *session) handleBinaryConnection(ctx context.Context, s *Server, r *buf
 				sendReplyResult(inbox, noJobReply)
 				break
 			}
-			sendReply(inbox, packetJobAssignUniq, [][]byte{
-				[]byte(job.Handle), []byte(job.FuncName), []byte(job.ID), job.Data,
-			})
+			if pt == packetGrabJobUniq {
+				sendReply(inbox, packetJobAssignUniq, [][]byte{
+					[]byte(job.Handle), []byte(job.FuncName), []byte(job.ID), job.Data,
+				})
+			}
+			if pt == packetGrabJobAll {
+				reducer := []byte{}
+				sendReply(inbox, packetJobAssignAll, [][]byte{
+					[]byte(job.Handle), []byte(job.FuncName), []byte(job.ID), reducer, job.Data,
+				})
+			}
+
 		case packetWorkData, packetWorkWarning, packetWorkStatus, packetWorkComplete, packetWorkFail, packetWorkException:
 			if se.w == nil {
 				return
