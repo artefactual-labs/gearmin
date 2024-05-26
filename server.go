@@ -220,7 +220,7 @@ func (s *Server) processRequest(e *event) {
 	case packetSetClientId:
 		w := args.t0.(*worker)
 		w.id = args.t1.(string)
-	case packetGrabJobUniq:
+	case packetGrabJobUniq, packetGrabJobAll:
 		e.result <- s.handleGrabJobUniq(sessionID)
 	case packetPreSleep:
 		w := args.t0.(*worker)

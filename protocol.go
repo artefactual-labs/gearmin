@@ -73,12 +73,12 @@ const (
 	//    RES    Client
 	packetGrabJobUniq //   REQ    Worker
 
-	packetJobAssignUniq   //   RES    Worker
+	packetJobAssignUniq   //  RES    Worker
 	packetSubmitJobHighBG //  REQ    Client
 	packetSubmitJobLow    //  REQ    Client
 	packetSubmitJobLowBG  //  REQ    Client
 	packetSubmitJobSched  //  REQ    Client
-	packetSubmitJobEpoch  //   36 REQ    Client
+	packetSubmitJobEpoch  //  REQ    Client
 
 	// New Codes (ref: https://github.com/gearman/gearmand/commit/eabf8a01030a16c80bada1e06c4162f8d129a5e8)
 	packetSubmitReduceJob           // REQ    Client
@@ -129,8 +129,12 @@ var labels = map[packet]string{
 	packetSubmitReduceJobBackground: "SUBMIT_REDUCE_JOB_BG",
 	packetGrabJobAll:                "GRAB_JOB_ALL",
 	packetJobAssignAll:              "JOB_ASSIGN_ALL",
-	packetGetStatusUnique:           "GET_STATUS_UNIQ",
-	packetStatusResUnique:           "STATUS_RES_UNIQ",
+	packetGetStatusUnique:           "GET_STATUS_UNIQUE",
+	packetStatusResUnique:           "STATUS_RES_UNIQUE",
+}
+
+func (i packet) String() string {
+	return i.label()
 }
 
 func (i packet) Uint32() uint32 {
@@ -142,11 +146,8 @@ func (i packet) label() string {
 }
 
 func newPacket(cmd uint32) (packet, error) {
-	if cmd >= packetCanDo.Uint32() && cmd <= packetSubmitJobEpoch.Uint32() {
+	if cmd >= packetCanDo.Uint32() && cmd <= packetStatusResUnique.Uint32() {
 		return packet(cmd), nil
-	}
-	if cmd >= packetSubmitReduceJob.Uint32() && cmd <= packetStatusResUnique.Uint32() {
-		return packet(cmd), fmt.Errorf("unsupported packet type %v", cmd)
 	}
 	return packet(cmd), fmt.Errorf("invalid packet type %v", cmd)
 }
@@ -189,6 +190,12 @@ var argc = []int{
 	/* SUBMIT_JOB_LOW_BG */ 3,
 	/* SUBMIT_JOB_SCHED */ 8,
 	/* SUBMIT_JOB_EPOCH */ 4,
+	/* SUBMIT_REDUCE_JOB */ 4,
+	/* SUBMIT_REDUCE_JOB_BG */ 4,
+	/* GRAB_JOB_ALL */ 0,
+	/* JOB_ASSIGN_ALL */ 5,
+	/* GET_STATUS_UNIQUE */ 1,
+	/* STATUS_RES_UNIQUE */ 1,
 }
 
 func (i packet) ArgCount() int {
