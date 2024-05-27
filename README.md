@@ -6,12 +6,20 @@
   <a href="https://pkg.go.dev/github.com/artefactual-labs/gearmin"><img src="https://img.shields.io/badge/go.dev-reference-007d9c?logo=go&logoColor=white&style=flat-square"/></a>
 </p>
 
-A lightweight, embeddable implementation of the Gearman job server protocol,
-written in Go. It is designed for developers looking for an in-process job
-server compatible with existing Gearman workers. Unlike [gearmand], job
-submissions are facilitated through direct API access.
+**gearmin** is a lightweight and embeddable implementation of the Gearman job
+server, written in Go, that partially implements the Gearman protocol. It is
+designed for developers looking for an in-process job server compatible with
+existing Gearman workers. Unlike [gearmand], job submissions are facilitated
+through direct API access.
 
-**Please do not use this implementation yet as it has not undergone testing.**
+## Non-goals
+
+We're not planning to support the following features:
+
+- Standalone server mode.
+- Persistent queues.
+- Job scheduling, timeouts, reducers and priorities.
+- Job submission via Gearman clients.
 
 ## Usage
 
@@ -28,6 +36,8 @@ srv.Submit(&gearmin.JobRequest{
   },
 })
 ```
+
+Use the [gearmintest] package to code that uses gearmin.
 
 ## Acknowledgement
 

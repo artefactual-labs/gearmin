@@ -11,6 +11,7 @@ import (
 	"sync/atomic"
 	"syscall"
 	"testing"
+	"time"
 
 	"github.com/google/go-cmp/cmp/cmpopts"
 	detectrace "github.com/ipfs/go-detect-race"
@@ -83,8 +84,19 @@ func TestServer(t *testing.T) {
 	<-jobDone
 	<-callbackDone
 
+	// Test CANT_DO.
+	w.SetId("new-id")
 	w.RemoveFunc("sum")
 	w.RemoveFunc("max")
+	srv.Submit(&gearmin.JobRequest{
+		FuncName:   "sum",
+		Data:       []byte(`{ "x": 1, "y": 1 }`),
+		Background: false,
+		Callback: func(update gearmin.JobUpdate) {
+			t.Fatal() // Should not be processed because the func was removed.
+		},
+	})
+	time.Sleep(time.Millisecond * 10) // Give the server some time to run it.
 
 	w.Close()
 

@@ -76,18 +76,24 @@ type jobHandleGenerator struct {
 	once   sync.Once
 }
 
+var (
+	hostname = os.Hostname
+	now      = time.Now
+	pid      = os.Getpid
+)
+
 func (j *jobHandleGenerator) jobHandle() string {
 	j.once.Do(func() {
-		hn, err := os.Hostname()
+		hn, err := hostname()
 		if err != nil {
 			hn = os.Getenv("HOSTNAME")
 		}
 		if hn == "" {
 			hn = "localhost"
 		}
-		j.prefix = fmt.Sprintf("%s%s:%d-%d-", jobHandlePrefix, hn, os.Getpid(), time.Now().Unix())
+		j.prefix = fmt.Sprintf("%s%s:%d-%d-", jobHandlePrefix, hn, pid(), now().Unix())
 	})
 
-	atomic.AddInt64(&j.start, 1)
-	return j.prefix + strconv.FormatInt(j.start, 10)
+	new := atomic.AddInt64(&j.start, 1)
+	return j.prefix + strconv.FormatInt(new, 10)
 }
