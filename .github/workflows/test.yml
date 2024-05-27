@@ -18,6 +18,8 @@ jobs:
         include:
           - gover: "stable"
             testflags: "-race"
+          - gover: "stable"
+            testflags: "-coverprofile=coverage.txt -covermode=atomic"
     runs-on: ubuntu-22.04
     steps:
       - name: Check out repository
@@ -32,6 +34,12 @@ jobs:
         run: go test ${{ matrix.testflags }} ./...
         env:
           GOARCH: ${{ matrix.goarch }}
+      - name: Upload coverage reports to Codecov
+        uses: codecov/codecov-action@v4.0.1
+        if: contains(matrix.testflags, 'coverage')
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          slug: artefactual-labs/gearmin
   apidiff:
     runs-on: ubuntu-22.04
     if: (github.event.action && 'pull_request' && !contains(github.event.pull_request.labels.*.name, 'breaking-change'))
