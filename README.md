@@ -1,7 +1,10 @@
 # gearmin
 
-[![go.dev reference](https://img.shields.io/badge/go.dev-reference-007d9c?logo=go&logoColor=white&style=flat-square)](https://pkg.go.dev/github.com/artefactual-labs/gearmin)
-
+<p align="left">
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-Apache%202.0-blue.svg"/></a>
+  <a href="https://codecov.io/gh/artefactual-labs/gearmin"><img src="https://img.shields.io/codecov/c/github/artefactual-labs/gearmain"/></a>
+  <a href="https://pkg.go.dev/github.com/artefactual-labs/gearmin"><img src="https://img.shields.io/badge/go.dev-reference-007d9c?logo=go&logoColor=white&style=flat-square"/></a>
+</p>
 
 A lightweight, embeddable implementation of the Gearman job server protocol,
 written in Go. It is designed for developers looking for an in-process job

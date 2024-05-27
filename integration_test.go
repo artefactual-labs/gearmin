@@ -13,6 +13,7 @@ import (
 	"testing"
 
 	"github.com/google/go-cmp/cmp/cmpopts"
+	detectrace "github.com/ipfs/go-detect-race"
 	"github.com/mikespook/gearman-go/worker"
 	"go.uber.org/goleak"
 	"gotest.tools/v3/assert"
@@ -26,6 +27,13 @@ func TestMain(m *testing.M) {
 
 func TestServer(t *testing.T) {
 	t.Parallel()
+
+	// This test is skipped if the data race is enabled because of a known race
+	// in the worker package that doesn not belong to this project. For more
+	// details, visit: https://gist.github.com/sevein/d7f36e6c5f2721335568905754ffabb3.
+	if detectrace.WithRace() {
+		t.SkipNow()
+	}
 
 	srv := createServer(t)
 
