@@ -10,60 +10,6 @@ import (
 	"time"
 )
 
-type jobWorkerMap struct {
-	workers *list.List
-	jobs    *list.List
-}
-
-func (m *jobWorkerMap) empty() bool {
-	return m.workers.Len() == 0 || m.jobs.Len() == 0
-}
-
-func (m *jobWorkerMap) asleep() *worker {
-	for it := m.workers.Front(); it != nil; it = it.Next() {
-		w := it.Value.(*worker)
-		if w.status == workerStatusSleep {
-			return w
-		}
-	}
-	return nil
-}
-
-// busy reports whether all jobs are busy.
-func (m *jobWorkerMap) busy() bool {
-	b := true
-	for it := m.jobs.Front(); it != nil; it = it.Next() {
-		j := it.Value.(*job)
-		if !j.Running.Load() {
-			b = false
-			break
-		}
-	}
-	return b
-}
-
-func (m *jobWorkerMap) addWorker(w *worker) {
-	for it := m.workers.Front(); it != nil; it = it.Next() {
-		if it.Value.(*worker).sessionID == w.sessionID {
-			return
-		}
-	}
-	m.workers.PushBack(w)
-}
-
-func (m *jobWorkerMap) removeWorker(sessionID int64) {
-	for it := m.workers.Front(); it != nil; it = it.Next() {
-		if it.Value.(*worker).sessionID == sessionID {
-			m.workers.Remove(it)
-			return
-		}
-	}
-}
-
-func (m *jobWorkerMap) addJob(j *job) {
-	m.jobs.PushBack(j)
-}
-
 type Server struct {
 	// Network listener (TCP).
 	ln net.Listener
@@ -91,7 +37,6 @@ type Server struct {
 	quitOnce sync.Once
 	quit     chan struct{}
 	wg       sync.WaitGroup
-	running  bool
 }
 
 func NewServerWithAddr(addr string) (*Server, error) {
@@ -149,7 +94,6 @@ func (s *Server) serve() {
 			case e := <-s.requests:
 				s.processRequest(e)
 			case <-s.quit:
-				cancel()
 				return
 			}
 		}
@@ -172,8 +116,6 @@ func (s *Server) serve() {
 			}()
 		}
 	}()
-
-	s.running = true
 }
 
 type JobRequest struct {
@@ -429,11 +371,62 @@ func (s *Server) Stop() {
 		return
 	}
 	s.quitOnce.Do(func() {
-		if !s.running {
-			return
-		}
 		close(s.quit)
 		s.ln.Close()
 		s.wg.Wait()
 	})
+}
+
+type jobWorkerMap struct {
+	workers *list.List
+	jobs    *list.List
+}
+
+func (m *jobWorkerMap) empty() bool {
+	return m.workers.Len() == 0 || m.jobs.Len() == 0
+}
+
+func (m *jobWorkerMap) asleep() *worker {
+	for it := m.workers.Front(); it != nil; it = it.Next() {
+		w := it.Value.(*worker)
+		if w.status == workerStatusSleep {
+			return w
+		}
+	}
+	return nil
+}
+
+// busy reports whether all jobs are busy.
+func (m *jobWorkerMap) busy() bool {
+	b := true
+	for it := m.jobs.Front(); it != nil; it = it.Next() {
+		j := it.Value.(*job)
+		if !j.Running.Load() {
+			b = false
+			break
+		}
+	}
+	return b
+}
+
+func (m *jobWorkerMap) addWorker(w *worker) {
+	for it := m.workers.Front(); it != nil; it = it.Next() {
+		if it.Value.(*worker).sessionID == w.sessionID {
+			return
+		}
+	}
+	m.workers.PushBack(w)
+}
+
+func (m *jobWorkerMap) removeWorker(sessionID int64) {
+	for it := m.workers.Front(); it != nil; it = it.Next() {
+		if it.Value.(*worker).sessionID == sessionID {
+			m.workers.Remove(it)
+			return
+		}
+	}
+}
+
+func (m *jobWorkerMap) addJob(j *job) {
+	m.jobs.PushBack(j)
 }
