@@ -106,6 +106,56 @@ func TestServer(t *testing.T) {
 	srv.Stop() // should not panic.
 }
 
+func TestUpdates(t *testing.T) {
+	t.Parallel()
+
+	srv := createServer(t)
+	createWorker(t, *srv.Addr(), map[string]worker.JobFunc{
+		"say": func(j worker.Job) ([]byte, error) {
+			j.SendData([]byte("data"))
+			j.SendWarning([]byte("warning"))
+			return j.Data(), nil
+		},
+	})
+
+	updates := make(chan gearmin.JobUpdate, 10)
+	srv.Submit(&gearmin.JobRequest{
+		FuncName:   "say",
+		Data:       []byte("data"),
+		Background: false,
+		Callback: func(update gearmin.JobUpdate) {
+			updates <- update
+		},
+	})
+
+	results := make([]gearmin.JobUpdate, 0, 3)
+	for i := 0; i < 3; i++ {
+		if r, ok := <-updates; ok {
+			results = append(results, r)
+		}
+	}
+
+	assert.DeepEqual(t,
+		results,
+		[]gearmin.JobUpdate{
+			{
+				Type: gearmin.JobUpdateTypeData,
+				Data: []byte("data"),
+			},
+			{
+				Type: gearmin.JobUpdateTypeWarning,
+				Data: []byte("warning"),
+			},
+			{
+				Type: gearmin.JobUpdateTypeComplete,
+				Data: []byte("data"),
+			},
+		},
+		cmpopts.IgnoreFields(gearmin.JobUpdate{}, "Handle"),
+		cmpopts.SortSlices(func(x, y gearmin.JobUpdate) bool { return x.Type > y.Type }),
+	)
+}
+
 func TestWithGearmanGoWorker(t *testing.T) {
 	t.Parallel()
 
