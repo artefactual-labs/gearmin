@@ -37,7 +37,7 @@ srv.Submit(&gearmin.JobRequest{
 })
 ```
 
-Use the [gearmintest] package to code that uses gearmin.
+Use the [gearmintest] package to test code that uses gearmin.
 
 ## Acknowledgement
 
@@ -57,3 +57,4 @@ Apache 2.0. See [LICENSE](LICENSE).
 [appscode/g2]: https://github.com/appscode/g2
 [ngaut/gearmand]: https://github.com/ngaut/gearmand
 [mikespook/gearman-go]: https://github.com/mikespook/gearman-go
+[gearmintest]: https://pkg.go.dev/github.com/artefactual-labs/gearmin/gearmintest
