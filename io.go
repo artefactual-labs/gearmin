@@ -2,6 +2,7 @@ package gearmin
 
 import (
 	"bytes"
+	"context"
 	"encoding/binary"
 	"io"
 	"net"
@@ -146,4 +147,20 @@ func readUint32(r io.Reader) (uint32, error) {
 	var value uint32
 	err := binary.Read(r, binary.BigEndian, &value)
 	return value, err
+}
+
+// ctxReader wraps an [io.Reader] to handle context cancellation. The state of
+// the context is checked before very read.
+type ctxReader struct {
+	ctx context.Context
+	r   io.Reader
+}
+
+func (r *ctxReader) Read(p []byte) (n int, err error) {
+	select {
+	case <-r.ctx.Done():
+		return 0, r.ctx.Err()
+	default:
+		return r.r.Read(p)
+	}
 }
