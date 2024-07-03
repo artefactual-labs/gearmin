@@ -30,7 +30,7 @@ func TestServer(t *testing.T) {
 	t.Parallel()
 
 	// This test is skipped if the data race is enabled because of a known race
-	// in the worker package that doesn not belong to this project. For more
+	// in the worker package that does not belong to this project. For more
 	// details, visit: https://gist.github.com/sevein/d7f36e6c5f2721335568905754ffabb3.
 	if detectrace.WithRace() {
 		t.SkipNow()
@@ -156,7 +156,7 @@ func TestUpdates(t *testing.T) {
 	)
 }
 
-func TestWithGearmanGoWorker(t *testing.T) {
+func TestServerWithGearmanGoWorker(t *testing.T) {
 	t.Parallel()
 
 	t.Skip("gearman-go is unreliable, see issue #3 for more details.")
@@ -200,7 +200,7 @@ func TestWithGearmanGoWorker(t *testing.T) {
 	assert.Equal(t, reported, int64(total))
 }
 
-func TestHighLoadWithGearmanCLIWorker(t *testing.T) {
+func TestServerHighLoadWithGearmanCLIWorker(t *testing.T) {
 	t.Parallel()
 
 	var wg sync.WaitGroup
@@ -236,6 +236,23 @@ func TestHighLoadWithGearmanCLIWorker(t *testing.T) {
 
 	wg.Wait()
 	assert.Equal(t, reported, int64(total))
+}
+
+func TestServerStop(t *testing.T) {
+	srv := createServer(t)
+
+	// Connect the worker. This causes session.handleBinaryConnection to block
+	// until it can read from the connection.
+	_ = createWorker(t, *srv.Addr(), map[string]worker.JobFunc{
+		"sum": func(j worker.Job) ([]byte, error) {
+			return []byte{}, nil
+		},
+	})
+
+	// We should be able to stop the server interrupting any blocking
+	// goroutines. See the use of `ctxReader` in session.go to see how we
+	// achieved this. This test won't pass if ctxReader is not used.
+	srv.Stop()
 }
 
 func createServer(t *testing.T) *gearmin.Server {

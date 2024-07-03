@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"io"
 	"net"
 	"sync"
 	"time"
@@ -178,7 +179,10 @@ func (se *session) handleConnection(ctx context.Context, s *Server, conn net.Con
 	se.handleBinaryConnection(ctx, s, r, sessionID, inbox)
 }
 
-func (se *session) handleBinaryConnection(ctx context.Context, s *Server, r *bufio.Reader, sessionID int64, inbox chan []byte) {
+func (se *session) handleBinaryConnection(ctx context.Context, s *Server, r io.Reader, sessionID int64, inbox chan []byte) {
+	// Create a context-aware reader so we can stop reads during cancellation.
+	r = &ctxReader{ctx, r}
+
 	for {
 		pt, buf, err := readMessage(r)
 		if err != nil {
