@@ -161,7 +161,7 @@ func (se *session) handleConnection(ctx context.Context, s *Server, conn net.Con
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		writer(conn, outbox)
+		writer(ctx, conn, outbox)
 	}()
 
 	r := bufio.NewReaderSize(conn, 256*1024)

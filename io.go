@@ -82,29 +82,50 @@ func readHeader(r io.Reader) (magic uint32, tp packet, size uint32, err error) {
 	return
 }
 
-func writer(conn net.Conn, outbox chan []byte) {
+func writer(ctx context.Context, conn net.Conn, outbox chan []byte) {
 	defer func() {
 		conn.Close()
 
 		// Drain outbox in case reader is blocked.
 		for range outbox {
+			select {
+			case <-ctx.Done():
+				return
+			default:
+			}
 		}
 	}()
 
 	b := bytes.NewBuffer(nil)
 
-	for msg := range outbox {
-		b.Write(msg)
-		for n := len(outbox); n > 0; n-- {
-			b.Write(<-outbox)
-		}
-
-		_ = conn.SetWriteDeadline(time.Now().Add(5 * time.Second))
-		_, err := conn.Write(b.Bytes())
-		if err != nil {
+	for {
+		select {
+		case <-ctx.Done():
 			return
+		case msg, ok := <-outbox:
+			if !ok {
+				return
+			}
+			b.Write(msg)
+			for n := len(outbox); n > 0; n-- {
+				select {
+				case msg := <-outbox:
+					b.Write(msg)
+				case <-ctx.Done():
+					return
+				default:
+					n = 0
+				}
+			}
+
+			_ = conn.SetWriteDeadline(time.Now().Add(5 * time.Second))
+			_, err := conn.Write(b.Bytes())
+			if err != nil {
+				return
+			}
+
+			b.Reset()
 		}
-		b.Reset()
 	}
 }
 
